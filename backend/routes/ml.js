@@ -4,9 +4,8 @@ const { poolPromise, sql } = require("../db");
 
 /**
  * GET /ml/anomalies
- *   /ml/anomalies
- *   /ml/anomalies?electionId=8
- *   /ml/anomalies?method=IsolationForest
+ *     /ml/anomalies?electionId=8
+ *     /ml/anomalies?method=IsolationForest
  */
 router.get("/anomalies", async (req, res) => {
   try {
@@ -60,21 +59,7 @@ router.get("/anomalies", async (req, res) => {
   }
 });
 
-/**
- * POST /ml/anomalies
- * body:
- * {
- *   "items": [
- *     {
- *       "auditLogId": 15,
- *       "detectionMethod": "IsolationForest", // або "model"
- *       "score": 0.97,
- *       "label": "anomaly",
- *       "details": { ... }
- *     }
- *   ]
- * }
- */
+// POST /ml/anomalies
 router.post("/anomalies", async (req, res) => {
   try {
     const items = Array.isArray(req.body.items) ? req.body.items : [];
