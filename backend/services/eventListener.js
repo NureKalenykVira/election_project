@@ -2,10 +2,20 @@ const { electionManager } = require("./contracts");
 const { logEvent } = require("./auditLogService");
 const { poolPromise, sql } = require("../db");
 
-// Допоміжна функція: зберегти вибори та кандидатів у таблиці Elections / Candidates
+const ENABLE_ML_AUTO =
+  process.env.ENABLE_ML_AUTO === "true" ||
+  process.env.ENABLE_ML_AUTO === "1";
+
+let runAllAnalyses = null;
+try {
+  ({ runAllAnalyses } = require("./mlRunner"));
+} catch (e) {
+  console.warn("[ML] mlRunner not found, automatic analyses disabled:", e.message);
+}
+
 async function upsertElectionFromEvent(args) {
   const {
-    id,             // BigInt
+    id,
     name,
     startTime,
     commitDeadline,
@@ -48,7 +58,6 @@ async function upsertElectionFromEvent(args) {
       END
     `);
 
-    // Видаляємо старих кандидатів для цих виборів
     const requestDel = new sql.Request(tx);
     requestDel.input("BlockchainElectionId", sql.BigInt, blockchainElectionId);
     await requestDel.query(`
@@ -58,7 +67,6 @@ async function upsertElectionFromEvent(args) {
       );
     `);
 
-    // Витягуємо внутрішній Id виборів
     const requestSel = new sql.Request(tx);
     requestSel.input("BlockchainElectionId", sql.BigInt, blockchainElectionId);
     const res = await requestSel.query(`
@@ -70,7 +78,6 @@ async function upsertElectionFromEvent(args) {
     }
     const electionDbId = electionRow.Id;
 
-    // Вставляємо кандидатів
     for (const cid of candidateIds) {
       const r = new sql.Request(tx);
       r.input("ElectionId", sql.Int, electionDbId);
@@ -88,7 +95,6 @@ async function upsertElectionFromEvent(args) {
   }
 }
 
-// Оновити Finalized в Elections на основі події ElectionFinalized
 async function markElectionFinalized(blockchainElectionId) {
   const pool = await poolPromise;
   const request = pool.request();
@@ -100,15 +106,13 @@ async function markElectionFinalized(blockchainElectionId) {
   `);
 }
 
-// Запуск підписки на події контракту
 function startEventListeners(chainIdFromEnv) {
   const chainId = chainIdFromEnv ? Number(chainIdFromEnv) : null;
 
-  // ElectionCreated(...)
   electionManager.on(
     "ElectionCreated",
     async (id, name, startTime, commitDeadline, revealDeadline, candidateIds, gatingEnabled, event) => {
-      const log = event.log ?? event; // v6: event.log, v5: сам event є логом
+      const log = event.log ?? event;
       const txHash = log.transactionHash;
       const blockNumber = log.blockNumber;
       const logIndex = log.index ?? log.logIndex ?? null;
@@ -118,7 +122,6 @@ function startEventListeners(chainIdFromEnv) {
         return;
       }
 
-      // 1) зберігаємо Elections / Candidates
       await upsertElectionFromEvent({
         id,
         name,
@@ -129,7 +132,6 @@ function startEventListeners(chainIdFromEnv) {
         gatingEnabled,
       });
 
-      // 2) пишемо в AuditLog
       const payload = JSON.stringify({
         name,
         startTime: Number(startTime),
@@ -155,7 +157,6 @@ function startEventListeners(chainIdFromEnv) {
     }
   );
 
-  // VoteCommitted(uint256 id, address voter, bytes32 commitHash)
   electionManager.on(
     "VoteCommitted",
     async (id, voter, commitHash, event) => {
@@ -189,7 +190,6 @@ function startEventListeners(chainIdFromEnv) {
     }
   );
 
-  // VoteRevealed(uint256 id, address voter, uint256 candidateId)
   electionManager.on(
     "VoteRevealed",
     async (id, voter, candidateId, event) => {
@@ -223,7 +223,6 @@ function startEventListeners(chainIdFromEnv) {
     }
   );
 
-  // ElectionFinalized(uint256 id)
   electionManager.on(
     "ElectionFinalized",
     async (id, event) => {
@@ -253,6 +252,18 @@ function startEventListeners(chainIdFromEnv) {
       });
 
       console.log("ElectionFinalized logged:", eid);
+
+      if (ENABLE_ML_AUTO && typeof runAllAnalyses === "function") {
+        runAllAnalyses()
+          .then(() => {
+            console.log("[ML] Analyses finished after finalize");
+          })
+          .catch((err) => {
+            console.error("[ML] Error while running analyses after finalize:", err);
+          });
+      } else {
+        console.log("[ML] Auto analyses skipped (disabled or mlRunner missing)");
+      }
     }
   );
 

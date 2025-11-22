@@ -42,7 +42,6 @@ async function writeLog({
   }
 }
 
-// Лог звичайного HTTP-запиту
 function logRequest(params) {
   return writeLog({
     level: "INFO",
@@ -51,7 +50,6 @@ function logRequest(params) {
   });
 }
 
-// Лог безпекової події (невдала авторизація, rate limit тощо)
 function logSecurityEvent(params) {
   return writeLog({
     level: "SECURITY",

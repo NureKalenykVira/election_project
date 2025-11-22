@@ -10,10 +10,15 @@ const voteRoutes = require("./routes/vote");
 const publicRoutes = require("./routes/public");
 const auditRoutes = require("./routes/audit");
 const mlRoutes = require("./routes/ml");
+const authRoutes = require("./routes/auth");
+const organizerRoutes = require("./routes/organizer");
 
 const { startEventListeners } = require("./services/eventListener");
 const authAdmin = require("./middleware/authAdmin");
-const { logRequest, logSecurityEvent } = require("./services/logger"); // новий логер
+const authUser = require("./middleware/authUser");
+const requireRole = authUser.requireRole;
+const { logRequest, logSecurityEvent } = require("./services/logger");
+
 require("./db");
 
 const app = express();
@@ -43,23 +48,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// Глобальний ліміт для всіх запитів
 const globalLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 хвилина
-  max: 200,            // не більше 200 запитів/хв з одного IP
+  windowMs: 60 * 1000,
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-app.use(globalLimiter);
-
-// Ліміт для /vote (захист від спаму голосів)
 const voteLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 хвилина
-  max: 20,             // до 20 запитів/хв на голосування з одного IP
+  windowMs: 60 * 1000,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  handler: (req, res, next) => {
+  handler: (req, res) => {
     const ip = req.ip || req.connection.remoteAddress;
     const path = req.originalUrl || req.url;
 
@@ -74,13 +75,12 @@ const voteLimiter = rateLimit({
   },
 });
 
-// Ліміт для адмінських ендпоінтів (захист від brute-force)
 const adminLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 хвилина
-  max: 10,             // до 10 admin-запитів/хв із одного IP
+  windowMs: 60 * 1000,
+  max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  handler: (req, res, next) => {
+  handler: (req, res) => {
     const ip = req.ip || req.connection.remoteAddress;
     const path = req.originalUrl || req.url;
 
@@ -91,13 +91,19 @@ const adminLimiter = rateLimit({
       statusCode: 429,
     });
 
-    return res.status(429).json({ error: "Too many requests on admin endpoints" });
+    return res
+      .status(429)
+      .json({ error: "Too many requests on admin endpoints" });
   },
 });
+
+app.use(globalLimiter);
 
 app.use("/admin", adminLimiter, authAdmin, adminRoutes);
 app.use("/ml", adminLimiter, authAdmin, mlRoutes);
 app.use("/audit", adminLimiter, authAdmin, auditRoutes);
+app.use("/auth", authRoutes);
+app.use("/organizer", authUser, requireRole("organizer"), organizerRoutes);
 app.use("/vote", voteLimiter, voteRoutes);
 app.use("/", publicRoutes);
 
@@ -112,9 +118,8 @@ function startServer() {
   return server;
 }
 
-
 if (require.main === module) {
   startServer();
 }
 
-module.exports = { app };
+module.exports = { app, startServer };
