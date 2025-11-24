@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { poolPromise, sql } = require("../db");
 
 async function createOffchainElection({
@@ -103,8 +104,41 @@ async function getElectionsForOrganizer(organizerUserId) {
   return result.recordset;
 }
 
+function hashWallet(address) {
+  if (!address) return null;
+  return crypto
+    .createHash("sha256")
+    .update(address.toLowerCase())
+    .digest("hex");
+}
+
+async function getElectionsForVoter(walletAddress) {
+  if (!walletAddress) {
+    return [];
+  }
+
+  const walletHash = hashWallet(walletAddress);
+
+  const pool = await poolPromise;
+  const result = await pool
+    .request()
+    .input("walletHash", sql.NVarChar(128), walletHash)
+    .query(`
+      SELECT DISTINCT e.*
+      FROM dbo.Elections e
+      INNER JOIN dbo.VotingRightSnapshots v
+        ON v.BlockchainElectionId = e.BlockchainElectionId
+      WHERE v.WalletHash = @walletHash
+        AND v.HasRight = 1
+      ORDER BY e.StartTimeUnix DESC;
+    `);
+
+  return result.recordset;
+}
+
 module.exports = {
   createOffchainElection,
   userOwnsElection,
   getElectionsForOrganizer,
+  getElectionsForVoter,
 };

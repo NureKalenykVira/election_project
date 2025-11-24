@@ -6,6 +6,10 @@ const {
   userOwnsElection,
   getElectionsForOrganizer,
 } = require("../services/elections");
+const {
+  addGrantedVotingRights,
+  addRevokedVotingRights,
+} = require("../services/votingRights");
 
 router.post("/elections", async (req, res) => {
   try {
@@ -100,6 +104,12 @@ router.post("/elections/:id/voters/grant", async (req, res) => {
     const tx = await votingRightToken.grantBatch(electionId, addresses);
     const receipt = await tx.wait();
 
+    try {
+      await addGrantedVotingRights(electionId, addresses);
+    } catch (dbErr) {
+      console.error("Organizer: error saving granted voting right snapshots:", dbErr);
+    }
+
     res.json({ success: true, txHash: receipt.hash });
   } catch (err) {
     console.error("Organizer: Error granting voting rights:", err);
@@ -117,6 +127,12 @@ router.post("/elections/:id/voters/revoke", async (req, res) => {
 
     const tx = await votingRightToken.revokeBatch(electionId, addresses);
     const receipt = await tx.wait();
+
+    try {
+      await addRevokedVotingRights(electionId, addresses);
+    } catch (dbErr) {
+      console.error("Organizer: error saving revoked voting right snapshots:", dbErr);
+    }
 
     res.json({ success: true, txHash: receipt.hash });
   } catch (err) {

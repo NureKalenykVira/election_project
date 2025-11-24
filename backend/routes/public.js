@@ -1,6 +1,30 @@
 const express = require("express");
 const router = express.Router();
 const { electionManager, votingRightToken } = require("../services/contracts");
+const authUser = require("../middleware/authUser");
+const { getElectionsForVoter } = require("../services/elections");
+
+// GET /my-elections
+router.get("/my-elections", authUser, async (req, res) => {
+  try {
+    const walletAddress = req.user?.walletAddress;
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        error: "У користувача не прив'язана адреса гаманця (walletAddress).",
+      });
+    }
+
+    const elections = await getElectionsForVoter(walletAddress);
+
+    res.json({
+      items: elections,
+    });
+  } catch (err) {
+    console.error("Error fetching voter elections:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // GET /elections/:id
 router.get("/elections/:id", async (req, res) => {

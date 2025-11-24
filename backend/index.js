@@ -104,7 +104,7 @@ app.use("/ml", adminLimiter, authAdmin, mlRoutes);
 app.use("/audit", adminLimiter, authAdmin, auditRoutes);
 app.use("/auth", authRoutes);
 app.use("/organizer", authUser, requireRole("organizer"), organizerRoutes);
-app.use("/vote", voteLimiter, voteRoutes);
+app.use("/vote", authUser, voteLimiter, voteRoutes);
 app.use("/", publicRoutes);
 
 const PORT = process.env.PORT || 5000;

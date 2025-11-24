@@ -1,47 +1,74 @@
 const express = require("express");
 const router = express.Router();
 const { ethers } = require("ethers");
-const { electionManager } = require("../services/contracts");
 
-// POST /vote/commit
-router.post("/commit", async (req, res) => {
-    try {
-        const { electionId, commitHash } = req.body;
+function buildCommitHash(electionId, candidateId, salt) {
+  return ethers.solidityPackedKeccak256(
+    ["uint256", "uint256", "string"],
+    [Number(electionId), Number(candidateId), String(salt)]
+  );
+}
 
-        if (!electionId || !commitHash) {
-            return res.status(400).json({ error: "electionId and commitHash are required" });
-        }
+// POST /vote/commit-hash
+router.post("/commit-hash", (req, res) => {
+  try {
+    const { electionId, candidateId, salt } = req.body;
 
-        const tx = await electionManager.commitVote(electionId, commitHash);
-        const receipt = await tx.wait();
-
-        res.json({
-            success: true,
-            txHash: receipt.hash
-        });
-    } catch (err) {
-        console.error("Error during vote commit:", err);
-        res.status(500).json({ error: err.reason || err.message });
+    if (
+      electionId === undefined ||
+      candidateId === undefined ||
+      salt === undefined
+    ) {
+      return res.status(400).json({
+        error: "electionId, candidateId та salt є обов'язковими полями",
+      });
     }
+
+    const commitHash = buildCommitHash(electionId, candidateId, salt);
+
+    return res.json({
+      success: true,
+      commitHash,
+    });
+  } catch (err) {
+    console.error("Error building commit hash:", err);
+    return res
+      .status(500)
+      .json({ error: err.reason || err.message || "Internal server error" });
+  }
 });
 
-// POST /vote/reveal
-router.post("/reveal", async (req, res) => {
-    try {
-        const { electionId, candidateId, salt } = req.body;
+// POST /vote/verify
+router.post("/verify", (req, res) => {
+  try {
+    const { electionId, candidateId, salt, commitHash } = req.body;
 
-        if (!electionId || !candidateId || !salt) {
-            return res.status(400).json({ error: "electionId, candidateId, and salt are required" });
-        }
-
-        const tx = await electionManager.revealVote(electionId, candidateId, salt);
-        const receipt = await tx.wait();
-
-        res.json({ success: true, txHash: receipt.hash });
-    } catch (err) {
-        console.error("Error revealing vote:", err);
-        res.status(500).json({ error: err.reason || err.message });
+    if (
+      electionId === undefined ||
+      candidateId === undefined ||
+      salt === undefined ||
+      !commitHash
+    ) {
+      return res.status(400).json({
+        error: "electionId, candidateId, salt та commitHash є обов'язковими полями",
+      });
     }
+
+    const expectedCommitHash = buildCommitHash(electionId, candidateId, salt);
+    const matches =
+      expectedCommitHash.toLowerCase() === commitHash.toLowerCase();
+
+    return res.json({
+      success: true,
+      expectedCommitHash,
+      matches,
+    });
+  } catch (err) {
+    console.error("Error verifying commit hash:", err);
+    return res
+      .status(500)
+      .json({ error: err.reason || err.message || "Internal server error" });
+  }
 });
 
 module.exports = router;

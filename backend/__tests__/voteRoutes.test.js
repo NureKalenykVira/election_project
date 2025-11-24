@@ -13,37 +13,28 @@ jest.mock("../services/eventListener", () => ({
   startEventListeners: jest.fn(),
 }));
 
-const mockElectionManager = {
-  commitVote: jest.fn(),
-  revealVote: jest.fn(),
-};
+jest.mock("../middleware/authUser", () => {
+  const mockAuthUser = (req, res, next) => {
+    req.user = {
+      id: 123,
+      role: "voter",
+      email: "test@example.com",
+    };
+    next();
+  };
 
-jest.mock("../services/contracts", () => ({
-  electionManager: mockElectionManager,
+  mockAuthUser.requireRole = () => (req, res, next) => next();
+
+  return mockAuthUser;
+});
+
+jest.mock("../middleware/requireRole", () => ({
+  requireRole: () => (req, res, next) => next(),
 }));
 
-const { electionManager } = require("../services/contracts");
 const { app } = require("../index");
 
-let consoleErrorSpy;
-
-beforeAll(() => {
-  consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-});
-
-beforeEach(() => {
-  if (consoleErrorSpy) {
-    consoleErrorSpy.mockClear();
-  }
-});
-
-afterAll(() => {
-  if (consoleErrorSpy) {
-    consoleErrorSpy.mockRestore();
-  }
-});
-
-describe("Vote routes (commit/reveal)", () => {
+describe("Vote routes (commit-hash / verify)", () => {
   beforeAll(() => {
     process.env.CHAIN_ID = process.env.CHAIN_ID || "1337";
   });
@@ -52,190 +43,86 @@ describe("Vote routes (commit/reveal)", () => {
     jest.clearAllMocks();
   });
 
-  // POST /vote/commit
-
-  test("POST /vote/commit — 400, якщо не передано electionId", async () => {
-    const res = await request(app)
-      .post("/vote/commit")
-      .send({ commitHash: "0xHASH" });
+  // POST /vote/commit-hash
+  test("POST /vote/commit-hash — 400, якщо не передано обов'язкові поля", async () => {
+    const res = await request(app).post("/vote/commit-hash").send({});
 
     expect(res.statusCode).toBe(400);
-    expect(res.body).toHaveProperty(
-      "error",
-      "electionId and commitHash are required"
-    );
-    expect(electionManager.commitVote).not.toHaveBeenCalled();
+    expect(res.body).toHaveProperty("error");
   });
 
-  test("POST /vote/commit — 400, якщо не передано commitHash", async () => {
-    const res = await request(app)
-      .post("/vote/commit")
-      .send({ electionId: "1" });
-
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toHaveProperty(
-      "error",
-      "electionId and commitHash are required"
-    );
-    expect(electionManager.commitVote).not.toHaveBeenCalled();
-  });
-
-  test("POST /vote/commit — 200, успіх: викликає commitVote і повертає txHash", async () => {
-    const mockTx = {
-      wait: jest.fn().mockResolvedValue({ hash: "0xcommit" }),
-    };
-    electionManager.commitVote.mockResolvedValue(mockTx);
-
-    const body = { electionId: "1", commitHash: "0xHASH" };
-
-    const res = await request(app).post("/vote/commit").send(body);
-
-    expect(electionManager.commitVote).toHaveBeenCalledWith(
-      "1",
-      "0xHASH"
-    );
-    expect(mockTx.wait).toHaveBeenCalledTimes(1);
-
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({
-      success: true,
-      txHash: "0xcommit",
-    });
-  });
-
-  test("POST /vote/commit — 500, якщо commitVote кидає помилку", async () => {
-    electionManager.commitVote.mockRejectedValue(
-      new Error("Commit failed")
-    );
-
-    const res = await request(app)
-      .post("/vote/commit")
-      .send({ electionId: "1", commitHash: "0xHASH" });
-
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toHaveProperty("error", "Commit failed");
-  });
-
-  test("POST /vote/commit — 500, якщо tx.wait кидає помилку", async () => {
-    const mockTx = {
-      wait: jest.fn().mockRejectedValue(new Error("Wait failed")),
-    };
-    electionManager.commitVote.mockResolvedValue(mockTx);
-
-    const res = await request(app)
-      .post("/vote/commit")
-      .send({ electionId: "1", commitHash: "0xHASH" });
-
-    expect(electionManager.commitVote).toHaveBeenCalledWith(
-      "1",
-      "0xHASH"
-    );
-    expect(mockTx.wait).toHaveBeenCalledTimes(1);
-
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toHaveProperty("error", "Wait failed");
-  });
-
-  // POST /vote/reveal
-
-  test("POST /vote/reveal — 400, якщо не передано electionId", async () => {
-    const res = await request(app)
-      .post("/vote/reveal")
-      .send({ candidateId: "2", salt: "secret" });
-
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toHaveProperty(
-      "error",
-      "electionId, candidateId, and salt are required"
-    );
-    expect(electionManager.revealVote).not.toHaveBeenCalled();
-  });
-
-  test("POST /vote/reveal — 400, якщо не передано candidateId", async () => {
-    const res = await request(app)
-      .post("/vote/reveal")
-      .send({ electionId: "1", salt: "secret" });
-
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toHaveProperty(
-      "error",
-      "electionId, candidateId, and salt are required"
-    );
-    expect(electionManager.revealVote).not.toHaveBeenCalled();
-  });
-
-  test("POST /vote/reveal — 400, якщо не передано salt", async () => {
-    const res = await request(app)
-      .post("/vote/reveal")
-      .send({ electionId: "1", candidateId: "2" });
-
-    expect(res.statusCode).toBe(400);
-    expect(res.body).toHaveProperty(
-      "error",
-      "electionId, candidateId, and salt are required"
-    );
-    expect(electionManager.revealVote).not.toHaveBeenCalled();
-  });
-
-  test("POST /vote/reveal — 200, успіх: викликає revealVote і повертає txHash", async () => {
-    const mockTx = {
-      wait: jest.fn().mockResolvedValue({ hash: "0xreveal" }),
-    };
-    electionManager.revealVote.mockResolvedValue(mockTx);
-
+  test("POST /vote/commit-hash — 200, успіх: повертає success та commitHash", async () => {
     const body = {
-      electionId: "1",
-      candidateId: "2",
-      salt: "secret",
+      electionId: 15,
+      candidateId: 1,
+      salt: "secret_salt",
     };
 
-    const res = await request(app).post("/vote/reveal").send(body);
-
-    expect(electionManager.revealVote).toHaveBeenCalledWith(
-      "1",
-      "2",
-      "secret"
-    );
-    expect(mockTx.wait).toHaveBeenCalledTimes(1);
+    const res = await request(app).post("/vote/commit-hash").send(body);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({
-      success: true,
-      txHash: "0xreveal",
-    });
+    expect(res.body.success).toBe(true);
+    expect(typeof res.body.commitHash).toBe("string");
+    expect(res.body.commitHash.startsWith("0x")).toBe(true);
   });
 
-  test("POST /vote/reveal — 500, якщо revealVote кидає помилку", async () => {
-    electionManager.revealVote.mockRejectedValue(
-      new Error("Reveal failed")
-    );
+  // POST /vote/verify
+  test("POST /vote/verify — 400, якщо не передано обов'язкові поля", async () => {
+    const res = await request(app).post("/vote/verify").send({});
 
-    const res = await request(app)
-      .post("/vote/reveal")
-      .send({ electionId: "1", candidateId: "2", salt: "secret" });
-
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toHaveProperty("error", "Reveal failed");
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toHaveProperty("error");
   });
 
-  test("POST /vote/reveal — 500, якщо tx.wait кидає помилку", async () => {
-    const mockTx = {
-      wait: jest.fn().mockRejectedValue(new Error("Wait failed")),
+  test("POST /vote/verify — 200, matches = true, якщо commitHash відповідає параметрам", async () => {
+    const body = {
+      electionId: 15,
+      candidateId: 1,
+      salt: "secret_salt",
     };
-    electionManager.revealVote.mockResolvedValue(mockTx);
 
-    const res = await request(app)
-      .post("/vote/reveal")
-      .send({ electionId: "1", candidateId: "2", salt: "secret" });
+    const commitRes = await request(app)
+      .post("/vote/commit-hash")
+      .send(body)
+      .expect(200);
 
-    expect(electionManager.revealVote).toHaveBeenCalledWith(
-      "1",
-      "2",
-      "secret"
-    );
-    expect(mockTx.wait).toHaveBeenCalledTimes(1);
+    const { commitHash } = commitRes.body;
 
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toHaveProperty("error", "Wait failed");
+    const verifyRes = await request(app)
+      .post("/vote/verify")
+      .send({ ...body, commitHash });
+
+    expect(verifyRes.statusCode).toBe(200);
+    expect(verifyRes.body.success).toBe(true);
+    expect(verifyRes.body.matches).toBe(true);
+  });
+
+  test("POST /vote/verify — 200, matches = false, якщо commitHash не відповідає параметрам", async () => {
+    const correctBody = {
+      electionId: 15,
+      candidateId: 1,
+      salt: "secret_salt",
+    };
+
+    const wrongBody = {
+      electionId: 15,
+      candidateId: 2, 
+      salt: "secret_salt",
+    };
+
+    const commitRes = await request(app)
+      .post("/vote/commit-hash")
+      .send(correctBody)
+      .expect(200);
+
+    const { commitHash } = commitRes.body;
+
+    const verifyRes = await request(app)
+      .post("/vote/verify")
+      .send({ ...wrongBody, commitHash });
+
+    expect(verifyRes.statusCode).toBe(200);
+    expect(verifyRes.body.success).toBe(true);
+    expect(verifyRes.body.matches).toBe(false);
   });
 });
