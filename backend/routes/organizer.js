@@ -11,6 +11,7 @@ const {
   addRevokedVotingRights,
 } = require("../services/votingRights");
 
+// Створення виборів
 router.post("/elections", async (req, res) => {
   try {
     const {
@@ -22,6 +23,11 @@ router.post("/elections", async (req, res) => {
       gatingEnabled,
     } = req.body;
 
+    // 1. Прогнозований id
+    const currentCount = await electionManager.electionsCount();
+    const predictedId = (currentCount + 1n).toString();
+
+    const t0 = Date.now();
     const tx = await electionManager.createElection(
       name,
       startTime,
@@ -30,35 +36,60 @@ router.post("/elections", async (req, res) => {
       candidateIds,
       gatingEnabled
     );
-    const receipt = await tx.wait();
-
-    const event = receipt.logs.find(
-      (log) => log.fragment?.name === "ElectionCreated"
+    const t1 = Date.now();
+    console.log(
+      "[organizer][createElection] tx sent",
+      tx.hash,
+      "sendTime =",
+      t1 - t0,
+      "ms"
     );
-    const electionId = event?.args?.id?.toString() || null;
 
-    if (!electionId) {
-      console.error("Organizer: ElectionCreated event not found in logs");
-    } else {
-      try {
-        await createOffchainElection({
-          blockchainElectionId: Number(electionId),
-          organizerUserId: req.user.id,
-          name,
-          startTime,
-          commitDeadline,
-          revealDeadline,
-          gatingEnabled,
-        });
-      } catch (err) {
-        console.error("Organizer: Error saving offchain election:", err);
-      }
+    // 2. Офчейн-запис для організатора (без очікування майнінгу)
+    try {
+      await createOffchainElection({
+        blockchainElectionId: Number(predictedId),
+        organizerUserId: req.user.id,
+        name,
+        startTime,
+        commitDeadline,
+        revealDeadline,
+        gatingEnabled,
+      });
+      console.log(
+        "[organizer][createElection] offchain saved (predictedId)",
+        predictedId
+      );
+    } catch (err) {
+      console.error(
+        "Organizer: Error saving offchain election (predictedId):",
+        err
+      );
     }
 
-    res.json({
+    // 3. Фонове очікування майнінгу (опційно, для логів)
+    tx.wait()
+      .then((receipt) => {
+        console.log(
+          "[organizer][createElection] mined block",
+          receipt.blockNumber,
+          "tx:",
+          tx.hash
+        );
+      })
+      .catch((err) => {
+        console.error(
+          "[organizer][createElection] tx.wait error (background):",
+          tx.hash,
+          err
+        );
+      });
+
+    // 4. Відповідь клієнту
+    res.status(202).json({
       success: true,
-      electionId: electionId || "unknown",
-      txHash: receipt.hash,
+      electionId: predictedId,
+      txHash: tx.hash,
       contractAddress: electionManager.target,
       tokenAddress: votingRightToken.target,
       organizerId: req.user?.id || null,
@@ -69,6 +100,7 @@ router.post("/elections", async (req, res) => {
   }
 });
 
+// Перевірка права власності / адмін
 async function ensureOwnershipOrAdmin(req, res) {
   const user = req.user;
   const electionId = req.params.id;
@@ -93,6 +125,7 @@ async function ensureOwnershipOrAdmin(req, res) {
   return true;
 }
 
+// Видача прав голосу
 router.post("/elections/:id/voters/grant", async (req, res) => {
   try {
     const ok = await ensureOwnershipOrAdmin(req, res);
@@ -101,22 +134,58 @@ router.post("/elections/:id/voters/grant", async (req, res) => {
     const electionId = req.params.id;
     const { addresses } = req.body;
 
+    const t0 = Date.now();
     const tx = await votingRightToken.grantBatch(electionId, addresses);
-    const receipt = await tx.wait();
+    const t1 = Date.now();
+    console.log(
+      "[organizer][grant] tx sent",
+      tx.hash,
+      "sendTime =",
+      t1 - t0,
+      "ms"
+    );
 
+    // Офчейн-лог прав голосу — одразу, без очікування майнінгу
     try {
       await addGrantedVotingRights(electionId, addresses);
+      console.log(
+        "[organizer][grant] offchain snapshots saved",
+        electionId,
+        addresses.length
+      );
     } catch (dbErr) {
-      console.error("Organizer: error saving granted voting right snapshots:", dbErr);
+      console.error(
+        "Organizer: error saving granted voting right snapshots:",
+        dbErr
+      );
     }
 
-    res.json({ success: true, txHash: receipt.hash });
+    // Фонове очікування майнінгу
+    tx.wait()
+      .then((receipt) => {
+        console.log(
+          "[organizer][grant] mined block",
+          receipt.blockNumber,
+          "tx:",
+          tx.hash
+        );
+      })
+      .catch((err) => {
+        console.error(
+          "[organizer][grant] tx.wait error (background):",
+          tx.hash,
+          err
+        );
+      });
+
+    res.status(202).json({ success: true, txHash: tx.hash });
   } catch (err) {
     console.error("Organizer: Error granting voting rights:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
+// Відкликання прав голосу
 router.post("/elections/:id/voters/revoke", async (req, res) => {
   try {
     const ok = await ensureOwnershipOrAdmin(req, res);
@@ -125,22 +194,58 @@ router.post("/elections/:id/voters/revoke", async (req, res) => {
     const electionId = req.params.id;
     const { addresses } = req.body;
 
+    const t0 = Date.now();
     const tx = await votingRightToken.revokeBatch(electionId, addresses);
-    const receipt = await tx.wait();
+    const t1 = Date.now();
+    console.log(
+      "[organizer][revoke] tx sent",
+      tx.hash,
+      "sendTime =",
+      t1 - t0,
+      "ms"
+    );
 
+    // Офчейн-лог відкликань — одразу
     try {
       await addRevokedVotingRights(electionId, addresses);
+      console.log(
+        "[organizer][revoke] offchain snapshots saved",
+        electionId,
+        addresses.length
+      );
     } catch (dbErr) {
-      console.error("Organizer: error saving revoked voting right snapshots:", dbErr);
+      console.error(
+        "Organizer: error saving revoked voting right snapshots:",
+        dbErr
+      );
     }
 
-    res.json({ success: true, txHash: receipt.hash });
+    // Фоновий wait
+    tx.wait()
+      .then((receipt) => {
+        console.log(
+          "[organizer][revoke] mined block",
+          receipt.blockNumber,
+          "tx:",
+          tx.hash
+        );
+      })
+      .catch((err) => {
+        console.error(
+          "[organizer][revoke] tx.wait error (background):",
+          tx.hash,
+          err
+        );
+      });
+
+    res.status(202).json({ success: true, txHash: tx.hash });
   } catch (err) {
     console.error("Organizer: Error revoking voting rights:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
+// Фіналізація виборів
 router.post("/elections/:id/finalize", async (req, res) => {
   try {
     const ok = await ensureOwnershipOrAdmin(req, res);
@@ -148,16 +253,43 @@ router.post("/elections/:id/finalize", async (req, res) => {
 
     const id = req.params.id;
 
+    const t0 = Date.now();
     const tx = await electionManager.finalize(id);
-    const receipt = await tx.wait();
+    const t1 = Date.now();
+    console.log(
+      "[organizer][finalize] tx sent",
+      tx.hash,
+      "sendTime =",
+      t1 - t0,
+      "ms"
+    );
 
-    res.json({ success: true, txHash: receipt.hash });
+    // markElectionFinalized + ML-аналіз робляться через event listener ElectionFinalized.
+    tx.wait()
+      .then((receipt) => {
+        console.log(
+          "[organizer][finalize] mined block",
+          receipt.blockNumber,
+          "tx:",
+          tx.hash
+        );
+      })
+      .catch((err) => {
+        console.error(
+          "[organizer][finalize] tx.wait error (background):",
+          tx.hash,
+          err
+        );
+      });
+
+    res.status(202).json({ success: true, txHash: tx.hash });
   } catch (err) {
     console.error("Organizer: Error finalizing election:", err);
     res.status(500).json({ error: err.reason || err.message });
   }
 });
 
+// Список виборів організатора
 router.get("/my-elections", async (req, res) => {
   try {
     if (!req.user || !req.user.id) {
