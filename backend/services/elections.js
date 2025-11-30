@@ -117,12 +117,15 @@ async function getElectionsForVoter(walletAddress) {
     return [];
   }
 
-  const walletHash = hashWallet(walletAddress);
+  const walletKey = normalizeWallet(walletAddress);
+  if (!walletKey) {
+    return [];
+  }
 
   const pool = await poolPromise;
   const result = await pool
     .request()
-    .input("walletHash", sql.NVarChar(128), walletHash)
+    .input("walletHash", sql.NVarChar(200), walletKey)
     .query(`
       SELECT DISTINCT e.*
       FROM dbo.Elections e

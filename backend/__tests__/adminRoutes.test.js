@@ -47,18 +47,11 @@ afterAll(() => {
 
 describe("Admin routes", () => {
   describe("POST /admin/elections", () => {
-    test("створює вибори і повертає electionId та хеш транзакції (успішний сценарій)", async () => {
+    test("створює вибори, відправляє транзакцію та повертає 202 + txHash", async () => {
       const tx = {
+        hash: "0xcreate",
         wait: jest.fn().mockResolvedValue({
-          hash: "0xcreate",
-          logs: [
-            {
-              fragment: { name: "ElectionCreated" },
-              args: {
-                id: { toString: () => "42" },
-              },
-            },
-          ],
+          blockNumber: 123,
         }),
       };
 
@@ -83,45 +76,14 @@ describe("Admin routes", () => {
         body.candidateIds,
         body.gatingEnabled
       );
-
       expect(tx.wait).toHaveBeenCalled();
 
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(202);
       expect(res.body).toEqual({
         success: true,
-        electionId: "42",
+        message:
+          "Election transaction sent. It will appear in the list after confirmation.",
         txHash: "0xcreate",
-        contractAddress: "0xmanager",
-        tokenAddress: "0xtoken",
-      });
-    });
-
-    test("повертає electionId = 'unknown', якщо події ElectionCreated немає в логах", async () => {
-      const tx = {
-        wait: jest.fn().mockResolvedValue({
-          hash: "0xnoevent",
-          logs: [],
-        }),
-      };
-
-      mockElectionManager.createElection.mockResolvedValue(tx);
-
-      const body = {
-        name: "Election without event",
-        startTime: 1000,
-        commitDeadline: 2000,
-        revealDeadline: 3000,
-        candidateIds: [1],
-        gatingEnabled: false,
-      };
-
-      const res = await request(app).post("/admin/elections").send(body);
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toEqual({
-        success: true,
-        electionId: "unknown",
-        txHash: "0xnoevent",
         contractAddress: "0xmanager",
         tokenAddress: "0xtoken",
       });
@@ -155,7 +117,8 @@ describe("Admin routes", () => {
   describe("POST /admin/elections/:id/voters/grant", () => {
     test("grantBatch викликається і повертається success + txHash (успішний сценарій)", async () => {
       const tx = {
-        wait: jest.fn().mockResolvedValue({ hash: "0xgrant" }),
+        hash: "0xgrant",
+        wait: jest.fn().mockResolvedValue({ blockNumber: 123 }),
       };
 
       mockVotingRightToken.grantBatch.mockResolvedValue(tx);
@@ -170,7 +133,7 @@ describe("Admin routes", () => {
       ]);
       expect(tx.wait).toHaveBeenCalled();
 
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(202);
       expect(res.body).toEqual({ success: true, txHash: "0xgrant" });
     });
 
@@ -195,7 +158,8 @@ describe("Admin routes", () => {
   describe("POST /admin/elections/:id/voters/revoke", () => {
     test("revokeBatch викликається і повертається success + txHash (успішний сценарій)", async () => {
       const tx = {
-        wait: jest.fn().mockResolvedValue({ hash: "0xrevoke" }),
+        hash: "0xrevoke",
+        wait: jest.fn().mockResolvedValue({ blockNumber: 321 }),
       };
 
       mockVotingRightToken.revokeBatch.mockResolvedValue(tx);
@@ -210,7 +174,7 @@ describe("Admin routes", () => {
       ]);
       expect(tx.wait).toHaveBeenCalled();
 
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(202);
       expect(res.body).toEqual({ success: true, txHash: "0xrevoke" });
     });
 
@@ -235,7 +199,8 @@ describe("Admin routes", () => {
   describe("POST /admin/elections/:id/finalize", () => {
     test("finalize викликається і повертається success + txHash (успішний сценарій)", async () => {
       const tx = {
-        wait: jest.fn().mockResolvedValue({ hash: "0xfinal" }),
+        hash: "0xfinal",
+        wait: jest.fn().mockResolvedValue({ blockNumber: 999 }),
       };
 
       mockElectionManager.finalize.mockResolvedValue(tx);
@@ -245,7 +210,7 @@ describe("Admin routes", () => {
       expect(mockElectionManager.finalize).toHaveBeenCalledWith("10");
       expect(tx.wait).toHaveBeenCalled();
 
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(202);
       expect(res.body).toEqual({ success: true, txHash: "0xfinal" });
     });
 
@@ -265,3 +230,4 @@ describe("Admin routes", () => {
     });
   });
 });
+і
