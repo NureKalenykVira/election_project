@@ -104,37 +104,57 @@ async function getElectionsForOrganizer(organizerUserId) {
   return result.recordset;
 }
 
-function hashWallet(address) {
+function normalizeWallet(address) {
   if (!address) return null;
-  return crypto
-    .createHash("sha256")
-    .update(address.toLowerCase())
-    .digest("hex");
+  return address.trim().toLowerCase();
 }
 
 async function getElectionsForVoter(walletAddress) {
+  console.log("[getElectionsForVoter] raw walletAddress =", walletAddress);
+
   if (!walletAddress) {
+    console.log("[getElectionsForVoter] no walletAddress → []");
     return [];
   }
 
   const walletKey = normalizeWallet(walletAddress);
+  console.log("[getElectionsForVoter] normalized walletKey =", walletKey);
+
   if (!walletKey) {
+    console.log("[getElectionsForVoter] walletKey is null → []");
     return [];
   }
 
   const pool = await poolPromise;
-  const result = await pool
+  const request = pool
     .request()
-    .input("walletHash", sql.NVarChar(200), walletKey)
-    .query(`
-      SELECT DISTINCT e.*
-      FROM dbo.Elections e
-      INNER JOIN dbo.VotingRightSnapshots v
-        ON v.BlockchainElectionId = e.BlockchainElectionId
-      WHERE v.WalletHash = @walletHash
-        AND v.HasRight = 1
-      ORDER BY e.StartTimeUnix DESC;
-    `);
+    .input("walletHash", sql.NVarChar(200), walletKey);
+
+  console.log(
+    "[getElectionsForVoter] SQL param walletHash =",
+    request.parameters.walletHash.value
+  );
+
+  const result = await request.query(`
+    SELECT DISTINCT e.*
+    FROM dbo.Elections e
+    INNER JOIN dbo.VotingRightSnapshots v
+      ON v.BlockchainElectionId = e.BlockchainElectionId
+    WHERE v.WalletHash = @walletHash
+      AND v.HasRight = 1
+    ORDER BY e.StartTimeUnix DESC;
+  `);
+
+  console.log(
+    "[getElectionsForVoter] rows returned =",
+    result.recordset.length
+  );
+  if (result.recordset.length > 0) {
+    console.log(
+      "[getElectionsForVoter] first row =",
+      JSON.stringify(result.recordset[0])
+    );
+  }
 
   return result.recordset;
 }

@@ -7,7 +7,11 @@ const { getElectionsForVoter } = require("../services/elections");
 // GET /my-elections
 router.get("/my-elections", authUser, async (req, res) => {
   try {
+    console.log("[/my-elections] req.user =", req.user);
+
     const walletAddress = req.user?.walletAddress;
+
+    console.log("[/my-elections] walletAddress from JWT =", walletAddress);
 
     if (!walletAddress) {
       return res.status(400).json({
@@ -16,6 +20,13 @@ router.get("/my-elections", authUser, async (req, res) => {
     }
 
     const elections = await getElectionsForVoter(walletAddress);
+
+    console.log(
+      "[/my-elections] elections.length =",
+      elections?.length,
+      "first =",
+      elections?.[0]
+    );
 
     res.json({
       items: elections,
